@@ -74,10 +74,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     );
   }
 
-  // 4. 오늘 날짜부터 한 달간의 날짜 생성
+  // 4. 오늘 날짜부터 2주간의 날짜 생성
   const dates: DateInfo[] = [];
   const today = new Date();
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 14; i++) {
     const date = new Date(today);
     date.setDate(today.getDate() + i);
     dates.push({
@@ -171,9 +171,7 @@ export default function DateRoute() {
                   className={cn(
                     'w-full px-4 py-4 text-left rounded-lg',
                     'transition-colors border border-gray-800',
-                    date.isAvailable
-                      ? 'hover:bg-gray-800/50 active:bg-gray-800'
-                      : 'opacity-50 cursor-not-allowed',
+                    'hover:bg-gray-800/50 active:bg-gray-800',
                   )}
                 >
                   <div className="flex items-center justify-between">
@@ -190,9 +188,6 @@ export default function DateRoute() {
                         {dayOfWeek}요일
                       </span>
                     </div>
-                    {!date.isAvailable && (
-                      <span className="text-sm text-gray-500">예매 불가</span>
-                    )}
                   </div>
                 </button>
               );
