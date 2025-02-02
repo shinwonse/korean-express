@@ -3,6 +3,7 @@ import type { MetaFunction } from '@remix-run/node';
 import { useNavigate } from '@remix-run/react';
 import { TrainSelectionCard } from '~/components/train-selection-card';
 import { cn } from '~/lib/cn';
+import { Button } from '~/components/ui/button';
 
 export const meta: MetaFunction = () => {
   return [
@@ -61,16 +62,7 @@ export default function Index() {
 
           {selectedTrain && (
             <div className={cn('mt-8 sm:mt-12 text-center')}>
-              <button
-                onClick={handleNextStep}
-                className={cn(
-                  'w-full sm:w-auto px-8 py-3 bg-blue-600 text-white rounded-lg',
-                  'hover:bg-blue-700 transition-colors font-medium',
-                  'shadow-lg hover:shadow-blue-500/20',
-                )}
-              >
-                다음 단계로
-              </button>
+              <Button onClick={handleNextStep}>다음 단계로</Button>
             </div>
           )}
         </div>
