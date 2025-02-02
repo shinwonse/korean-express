@@ -26,7 +26,12 @@ export default function StationsRoute() {
         return;
       }
       // 도착역이 선택되면 다음 단계(날짜 선택)로 이동
-      navigate(`/booking/${trainType}/date`, {
+      const searchParams = new URLSearchParams({
+        dep: selectedDeparture!.code,
+        arr: station.code,
+      });
+
+      navigate(`/booking/${trainType}/date?${searchParams.toString()}`, {
         state: {
           departure: selectedDeparture,
           arrival: station,

@@ -1,153 +1,187 @@
-import { useParams, Form, useActionData } from '@remix-run/react';
-import { useForm } from 'react-hook-form';
-import { json, ActionFunctionArgs, redirect } from '@remix-run/node';
-import { cn } from '~/lib/cn';
+import { json, redirect, type ActionFunctionArgs } from '@remix-run/node';
+import {
+  Form,
+  useActionData,
+  useNavigation,
+  useParams,
+} from '@remix-run/react';
 import { login, sessionStorage } from '~/services/auth.server';
+import { cn } from '~/lib/cn';
 
-interface AuthForm {
-  username: string;
-  password: string;
+interface ActionData {
+  error?: string;
+  success?: boolean;
 }
 
-const SRT_LOGIN_URL = 'https://etk.srail.kr/cmc/01/selectLoginInfo.do';
-const KTX_LOGIN_URL = 'https://www.letskorail.com/korail/com/login.do';
-
 export async function action({ request, params }: ActionFunctionArgs) {
-  const formData = await request.formData();
-  const username = formData.get('username') as string;
-  const password = formData.get('password') as string;
-  const trainType = params.trainType?.toUpperCase() as 'SRT' | 'KTX';
-
-  const result = await login(trainType, username, password);
-
-  if (!result.success) {
-    return json({ error: result.message }, { status: 400 });
+  const trainType = params.trainType?.toUpperCase();
+  if (trainType !== 'SRT' && trainType !== 'KTX') {
+    return json<ActionData>(
+      { error: '잘못된 기차 유형입니다.' },
+      { status: 400 },
+    );
   }
 
-  // 세션 생성
-  const session = await sessionStorage.getSession();
-  session.set('sessionId', result.sessionId);
+  try {
+    let username: string | undefined;
+    let password: string | undefined;
 
-  // 다음 단계로 리다이렉트
-  return redirect(`/booking/${params.trainType}/stations`, {
-    headers: {
-      'Set-Cookie': await sessionStorage.commitSession(session),
-    },
-  });
+    const contentType = request.headers.get('content-type') || '';
+
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      const formData = await request.formData();
+      username = formData.get('username')?.toString();
+      password = formData.get('password')?.toString();
+    } else {
+      const body = await request.formData();
+      username = body.get('username')?.toString();
+      password = body.get('password')?.toString();
+    }
+
+    if (!username || !password) {
+      return json<ActionData>(
+        { error: '아이디와 비밀번호를 입력해주세요.' },
+        { status: 400 },
+      );
+    }
+
+    const result = await login(trainType as 'SRT' | 'KTX', username, password);
+
+    if (!result.success) {
+      return json<ActionData>(
+        { error: result.message || '로그인에 실패했습니다.' },
+        { status: 401 },
+      );
+    }
+
+    const session = await sessionStorage.getSession();
+    session.set('sessionKey', result.sessionKey);
+    session.set('trainType', trainType);
+
+    return redirect(`/booking/${params.trainType}/stations`, {
+      headers: {
+        'Set-Cookie': await sessionStorage.commitSession(session),
+      },
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    return json<ActionData>(
+      { error: '로그인 중 오류가 발생했습니다.' },
+      { status: 500 },
+    );
+  }
 }
 
 export default function AuthPage() {
   const { trainType } = useParams();
   const actionData = useActionData<typeof action>();
-  const {
-    register,
-    formState: { errors },
-  } = useForm<AuthForm>({
-    defaultValues: {
-      username: '',
-      password: '',
-    },
-  });
+  const navigation = useNavigation();
+  const isSubmitting = navigation.state === 'submitting';
 
   return (
     <div className={cn('min-h-screen bg-gray-900 text-gray-100')}>
-      <main className={cn('container mx-auto px-4 sm:px-6 lg:px-8 py-16')}>
-        <div className={cn('max-w-md mx-auto')}>
-          <h1
+      <main className={cn('container mx-auto px-4 py-16 sm:px-6 lg:px-8')}>
+        <div className={cn('mx-auto max-w-md')}>
+          <div className={cn('mb-8 text-center')}>
+            <h1 className={cn('text-3xl font-bold')}>
+              {trainType?.toUpperCase()} 로그인
+            </h1>
+            <p className={cn('mt-2 text-gray-400')}>
+              {trainType?.toUpperCase()} 서비스 이용을 위해 로그인해주세요
+            </p>
+          </div>
+
+          <div
             className={cn(
-              'text-2xl sm:text-3xl font-bold text-center text-white mb-8',
+              'rounded-lg bg-gray-800 p-8 shadow-xl',
+              'ring-1 ring-gray-700',
             )}
           >
-            {trainType?.toUpperCase()} 로그인
-          </h1>
+            <Form method="post" className={cn('space-y-6')}>
+              <div className={cn('space-y-4')}>
+                <div>
+                  <label
+                    htmlFor="username"
+                    className={cn('mb-2 block text-sm font-medium')}
+                  >
+                    아이디
+                  </label>
+                  <input
+                    id="username"
+                    name="username"
+                    type="text"
+                    autoComplete="username"
+                    required
+                    className={cn(
+                      'block w-full rounded-md border-0 bg-gray-700 px-4 py-2',
+                      'text-white placeholder:text-gray-400',
+                      'focus:outline-none focus:ring-2 focus:ring-blue-500',
+                      'transition-colors duration-200',
+                    )}
+                    placeholder="회원 아이디를 입력하세요"
+                  />
+                </div>
 
-          <Form
-            method="post"
-            className={cn('space-y-6 bg-gray-800 p-6 rounded-lg shadow-xl')}
-          >
-            <div>
-              <label
-                htmlFor="username"
-                className={cn('block text-sm font-medium text-gray-300 mb-2')}
-              >
-                아이디
-              </label>
-              <input
-                id="username"
-                {...register('username', {
-                  required: '아이디를 입력해주세요',
-                  minLength: {
-                    value: 4,
-                    message: '아이디는 4자 이상이어야 합니다',
-                  },
-                })}
+                <div>
+                  <label
+                    htmlFor="password"
+                    className={cn('mb-2 block text-sm font-medium')}
+                  >
+                    비밀번호
+                  </label>
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                    className={cn(
+                      'block w-full rounded-md border-0 bg-gray-700 px-4 py-2',
+                      'text-white placeholder:text-gray-400',
+                      'focus:outline-none focus:ring-2 focus:ring-blue-500',
+                      'transition-colors duration-200',
+                    )}
+                    placeholder="비밀번호를 입력하세요"
+                  />
+                </div>
+              </div>
+
+              {actionData?.error && (
+                <div
+                  className={cn(
+                    'rounded-md bg-red-500/10 p-3',
+                    'text-sm text-red-400',
+                  )}
+                >
+                  {actionData.error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
                 className={cn(
-                  'w-full px-4 py-2 bg-gray-700 border rounded-md',
-                  'text-white focus:outline-none focus:ring-2 focus:ring-blue-500',
-                  errors.username
-                    ? 'border-red-500 focus:ring-red-500'
-                    : 'border-gray-600',
+                  'relative w-full rounded-lg bg-blue-600 px-4 py-3',
+                  'text-sm font-semibold text-white shadow-sm',
+                  'hover:bg-blue-500 focus-visible:outline focus-visible:outline-2',
+                  'focus-visible:outline-offset-2 focus-visible:outline-blue-600',
+                  'disabled:cursor-not-allowed disabled:opacity-70',
+                  'transition-colors duration-200',
                 )}
-                placeholder="아이디를 입력하세요"
-              />
-              {errors.username && (
-                <p className={cn('mt-1 text-sm text-red-500')}>
-                  {errors.username.message}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label
-                htmlFor="password"
-                className={cn('block text-sm font-medium text-gray-300 mb-2')}
               >
-                비밀번호
-              </label>
-              <input
-                id="password"
-                type="password"
-                {...register('password', {
-                  required: '비밀번호를 입력해주세요',
-                  minLength: {
-                    value: 8,
-                    message: '비밀번호는 8자 이상이어야 합니다',
-                  },
-                })}
-                className={cn(
-                  'w-full px-4 py-2 bg-gray-700 border rounded-md',
-                  'text-white focus:outline-none focus:ring-2 focus:ring-blue-500',
-                  errors.password
-                    ? 'border-red-500 focus:ring-red-500'
-                    : 'border-gray-600',
+                {isSubmitting ? (
+                  <>
+                    <span className="mr-2">로그인 중</span>
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2">
+                      ···
+                    </span>
+                  </>
+                ) : (
+                  '로그인'
                 )}
-                placeholder="비밀번호를 입력하세요"
-              />
-              {errors.password && (
-                <p className={cn('mt-1 text-sm text-red-500')}>
-                  {errors.password.message}
-                </p>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              className={cn(
-                'w-full px-4 py-3 bg-blue-600 text-white rounded-lg',
-                'hover:bg-blue-700 transition-colors font-medium',
-                'shadow-lg hover:shadow-blue-500/20',
-                'disabled:opacity-50 disabled:cursor-not-allowed',
-              )}
-            >
-              로그인
-            </button>
-
-            {actionData?.error && (
-              <p className={cn('text-sm text-red-500 text-center')}>
-                {actionData.error}
-              </p>
-            )}
-          </Form>
+              </button>
+            </Form>
+          </div>
         </div>
       </main>
     </div>

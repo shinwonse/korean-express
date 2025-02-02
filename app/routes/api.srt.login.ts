@@ -1,5 +1,5 @@
-import { ActionFunctionArgs, json } from '@remix-run/node';
-import { SRTService } from '~/services/srt.server';
+import { json, type ActionFunctionArgs } from '@remix-run/node';
+import { login, sessionStorage } from '~/services/auth.server';
 
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== 'POST') {
@@ -7,27 +7,40 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
-    const { username, password } = await request.json();
+    const formData = await request.formData();
+    const username = formData.get('username');
+    const password = formData.get('password');
 
     if (!username || !password) {
       return json(
-        { error: '아이디와 비밀번호를 입력해주세요' },
+        { error: '아이디와 비밀번호를 입력해주세요.' },
         { status: 400 },
       );
     }
 
-    const srtService = SRTService.getInstance();
-    const response = await srtService.login(username, password);
+    const result = await login('SRT', username.toString(), password.toString());
 
-    return response;
-  } catch (error) {
-    console.error('SRT 로그인 API 에러:', error);
+    if (!result.success) {
+      return json(
+        { error: result.message || '로그인에 실패했습니다.' },
+        { status: 401 },
+      );
+    }
+
+    const session = await sessionStorage.getSession();
+    session.set('sessionKey', result.sessionKey);
+    session.set('trainType', 'SRT');
+
     return json(
+      { success: true },
       {
-        error:
-          error instanceof Error ? error.message : 'SRT 로그인에 실패했습니다',
+        headers: {
+          'Set-Cookie': await sessionStorage.commitSession(session),
+        },
       },
-      { status: 500 },
     );
+  } catch (error) {
+    console.error('Login error:', error);
+    return json({ error: '로그인 중 오류가 발생했습니다.' }, { status: 500 });
   }
 }
