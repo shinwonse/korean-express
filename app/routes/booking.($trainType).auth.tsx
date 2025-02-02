@@ -1,18 +1,49 @@
-import { useParams } from '@remix-run/react';
+import { useParams, Form, useActionData } from '@remix-run/react';
 import { useForm } from 'react-hook-form';
+import { json, ActionFunctionArgs, redirect } from '@remix-run/node';
 import { cn } from '~/lib/cn';
+import { login, sessionStorage } from '~/services/auth.server';
 
 interface AuthForm {
   username: string;
   password: string;
 }
 
+const SRT_LOGIN_URL = 'https://etk.srail.kr/cmc/01/selectLoginInfo.do';
+const KTX_LOGIN_URL = 'https://www.letskorail.com/korail/com/login.do';
+
+export async function action({ request, params }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const username = formData.get('username') as string;
+  const password = formData.get('password') as string;
+  const trainType = params.trainType?.toUpperCase() as 'SRT' | 'KTX';
+
+  const result = await login(trainType, username, password);
+
+  if (!result.success) {
+    return json({ error: result.message }, { status: 400 });
+  }
+
+  // 세션 생성
+  const session = await sessionStorage.getSession();
+  session.set('sessionId', result.sessionId);
+
+  // 다음 단계로 리다이렉트
+  return redirect(`/booking/${trainType.toLowerCase()}/select-station`, {
+    headers: {
+      'Set-Cookie': await sessionStorage.commitSession(session),
+    },
+  });
+}
+
 export default function AuthPage() {
   const { trainType } = useParams();
+  const actionData = useActionData<typeof action>();
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
+    setError,
   } = useForm<AuthForm>({
     defaultValues: {
       username: '',
@@ -21,8 +52,29 @@ export default function AuthPage() {
   });
 
   const onSubmit = handleSubmit(async (data) => {
-    // TODO: 실제 로그인 로직 구현
-    console.log(data);
+    try {
+      const response = await fetch('/api/srt/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || '로그인에 실패했습니다');
+      }
+
+      // 로그인 성공 시 다음 단계로 이동
+      // TODO: 다음 단계 구현
+    } catch (error) {
+      setError('root', {
+        message:
+          error instanceof Error ? error.message : '로그인에 실패했습니다',
+      });
+    }
   });
 
   return (
@@ -37,7 +89,8 @@ export default function AuthPage() {
             {trainType?.toUpperCase()} 로그인
           </h1>
 
-          <form
+          <Form
+            method="post"
             onSubmit={onSubmit}
             className={cn('space-y-6 bg-gray-800 p-6 rounded-lg shadow-xl')}
           >
@@ -118,7 +171,13 @@ export default function AuthPage() {
             >
               {isSubmitting ? '로그인 중...' : '로그인'}
             </button>
-          </form>
+
+            {errors.root && (
+              <p className={cn('text-sm text-red-500 text-center')}>
+                {errors.root.message}
+              </p>
+            )}
+          </Form>
         </div>
       </main>
     </div>

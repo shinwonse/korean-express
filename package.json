@@ -17,6 +17,7 @@
     "@tailwindcss/vite": "^4.0.3",
     "clsx": "^2.1.1",
     "isbot": "^5.1.22",
+    "node-fetch": "2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.54.2",
