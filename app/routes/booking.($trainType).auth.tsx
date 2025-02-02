@@ -29,7 +29,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   session.set('sessionId', result.sessionId);
 
   // 다음 단계로 리다이렉트
-  return redirect(`/booking/${trainType.toLowerCase()}/select-station`, {
+  return redirect(`/booking/${params.trainType}/stations`, {
     headers: {
       'Set-Cookie': await sessionStorage.commitSession(session),
     },
@@ -41,40 +41,12 @@ export default function AuthPage() {
   const actionData = useActionData<typeof action>();
   const {
     register,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-    setError,
+    formState: { errors },
   } = useForm<AuthForm>({
     defaultValues: {
       username: '',
       password: '',
     },
-  });
-
-  const onSubmit = handleSubmit(async (data) => {
-    try {
-      const response = await fetch('/api/srt/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || '로그인에 실패했습니다');
-      }
-
-      // 로그인 성공 시 다음 단계로 이동
-      // TODO: 다음 단계 구현
-    } catch (error) {
-      setError('root', {
-        message:
-          error instanceof Error ? error.message : '로그인에 실패했습니다',
-      });
-    }
   });
 
   return (
@@ -91,7 +63,6 @@ export default function AuthPage() {
 
           <Form
             method="post"
-            onSubmit={onSubmit}
             className={cn('space-y-6 bg-gray-800 p-6 rounded-lg shadow-xl')}
           >
             <div>
@@ -161,7 +132,6 @@ export default function AuthPage() {
 
             <button
               type="submit"
-              disabled={isSubmitting}
               className={cn(
                 'w-full px-4 py-3 bg-blue-600 text-white rounded-lg',
                 'hover:bg-blue-700 transition-colors font-medium',
@@ -169,12 +139,12 @@ export default function AuthPage() {
                 'disabled:opacity-50 disabled:cursor-not-allowed',
               )}
             >
-              {isSubmitting ? '로그인 중...' : '로그인'}
+              로그인
             </button>
 
-            {errors.root && (
+            {actionData?.error && (
               <p className={cn('text-sm text-red-500 text-center')}>
-                {errors.root.message}
+                {actionData.error}
               </p>
             )}
           </Form>
