@@ -23,20 +23,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   try {
-    let username: string | undefined;
-    let password: string | undefined;
-
-    const contentType = request.headers.get('content-type') || '';
-
-    if (contentType.includes('application/x-www-form-urlencoded')) {
-      const formData = await request.formData();
-      username = formData.get('username')?.toString();
-      password = formData.get('password')?.toString();
-    } else {
-      const body = await request.formData();
-      username = body.get('username')?.toString();
-      password = body.get('password')?.toString();
-    }
+    const formData = await request.formData();
+    const username = formData.get('username')?.toString();
+    const password = formData.get('password')?.toString();
 
     if (!username || !password) {
       return json<ActionData>(
@@ -47,7 +36,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     const result = await login(trainType as 'SRT' | 'KTX', username, password);
 
-    if (!result.success) {
+    if (!result.success || !result.sessionKey) {
       return json<ActionData>(
         { error: result.message || '로그인에 실패했습니다.' },
         { status: 401 },
@@ -57,6 +46,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const session = await sessionStorage.getSession();
     session.set('sessionKey', result.sessionKey);
     session.set('trainType', trainType);
+    session.set('username', username);
+
+    console.log('Saving session:', {
+      sessionKey: result.sessionKey,
+      trainType,
+      username,
+    });
 
     return redirect(`/booking/${params.trainType}/stations`, {
       headers: {

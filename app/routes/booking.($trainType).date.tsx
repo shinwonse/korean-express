@@ -1,59 +1,100 @@
 import { useNavigate, useParams, useLocation } from '@remix-run/react';
-import { json, LoaderFunctionArgs } from '@remix-run/node';
+import { json, redirect, type LoaderFunctionArgs } from '@remix-run/node';
 import { Button } from '~/components/ui/button';
 import { ChevronLeft } from 'lucide-react';
 import { cn } from '~/lib/cn';
 import type { Station } from '~/constants/stations';
 import { SRTService } from '~/services/srt.server';
 import { useLoaderData } from '@remix-run/react';
-import { getSession } from '~/sessions';
+import { sessionStorage } from '~/services/auth.server';
 
 interface LocationState {
   departure: Station;
   arrival: Station;
 }
 
-interface AvailableDate {
-  date: string;
-  isAvailable: boolean;
+interface DateInfo {
+  value: string;
+  label: string;
+}
+
+interface LoaderData {
+  dates: DateInfo[];
+  departureStation: string;
+  arrivalStation: string;
+  departureCode: string;
+  arrivalCode: string;
+}
+
+interface LoaderError {
+  error: string;
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const session = await getSession(request.headers.get('Cookie'));
-  const sessionId = session.get('sessionId');
+  // 1. 세션 확인
+  const session = await sessionStorage.getSession(
+    request.headers.get('Cookie'),
+  );
+  const sessionKey = session.get('sessionKey');
+  const trainType = session.get('trainType');
 
   console.log('Session cookie:', request.headers.get('Cookie'));
-  console.log('Session data:', session.data);
-  console.log('Session ID:', sessionId);
+  console.log('Session data:', { sessionKey, trainType });
 
-  if (!sessionId) {
-    throw new Error('로그인이 필요합니다');
+  if (!sessionKey || !trainType) {
+    return redirect('/booking/srt/auth');
   }
 
-  const srtService = SRTService.getInstance();
-  const isAuthenticated = await srtService.isAuthenticated(sessionId);
+  // 2. URL 파라미터 확인
+  const url = new URL(request.url);
+  const dep = url.searchParams.get('dep');
+  const arr = url.searchParams.get('arr');
 
-  if (!isAuthenticated) {
-    throw new Error('로그인이 필요합니다');
+  if (!dep || !arr) {
+    return json<LoaderError>(
+      { error: '출발역과 도착역을 선택해주세요.' },
+      { status: 400 },
+    );
   }
 
-  const searchParams = new URL(request.url).searchParams;
-  const depStationCode = searchParams.get('dep');
-  const arrStationCode = searchParams.get('arr');
+  // 3. 역 코드 매핑
+  const stationMap: Record<string, string> = {
+    SSR: '0551', // 수서
+    BSN: '0025', // 부산
+    // ... 다른 역 코드들
+  };
 
-  if (!depStationCode || !arrStationCode) {
-    throw new Error('출발역과 도착역이 필요합니다');
+  const departureCode = stationMap[dep];
+  const arrivalCode = stationMap[arr];
+
+  if (!departureCode || !arrivalCode) {
+    return json<LoaderError>(
+      { error: '잘못된 역 코드입니다.' },
+      { status: 400 },
+    );
   }
 
+  // 4. 오늘 날짜부터 한 달간의 날짜 생성
+  const dates: DateInfo[] = [];
   const today = new Date();
-  const availableDates = await srtService.getAvailableDates(
-    sessionId,
-    depStationCode,
-    arrStationCode,
-    today,
-  );
+  for (let i = 0; i < 30; i++) {
+    const date = new Date(today);
+    date.setDate(today.getDate() + i);
+    dates.push({
+      value: date.toISOString().split('T')[0].replace(/-/g, ''),
+      label: `${date.getMonth() + 1}월 ${date.getDate()}일 (${
+        ['일', '월', '화', '수', '목', '금', '토'][date.getDay()]
+      })`,
+    });
+  }
 
-  return json({ availableDates });
+  return json<LoaderData>({
+    dates,
+    departureStation: dep,
+    arrivalStation: arr,
+    departureCode,
+    arrivalCode,
+  });
 }
 
 export default function DateRoute() {
@@ -61,7 +102,18 @@ export default function DateRoute() {
   const { trainType } = useParams();
   const location = useLocation();
   const { departure, arrival } = location.state as LocationState;
-  const { availableDates } = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
+
+  // 에러 처리
+  if ('error' in data) {
+    return (
+      <div className="container mx-auto p-4">
+        <div className="text-red-600">{data.error}</div>
+      </div>
+    );
+  }
+
+  const { dates, departureStation, arrivalStation } = data;
 
   const handleDateSelect = (dateStr: string) => {
     navigate(`/booking/${trainType}/time`, {
@@ -109,18 +161,17 @@ export default function DateRoute() {
               <span>→</span>
               <span>{arrival.name}</span>
             </div>
-            {availableDates.map((dateInfo) => {
-              const { month, day, dayOfWeek } = formatDate(dateInfo.date);
+            {dates.map((date) => {
+              const { month, day, dayOfWeek } = formatDate(date.value);
               const isWeekend = dayOfWeek === '토' || dayOfWeek === '일';
               return (
                 <button
-                  key={dateInfo.date}
-                  onClick={() => handleDateSelect(dateInfo.date)}
-                  disabled={!dateInfo.isAvailable}
+                  key={date.value}
+                  onClick={() => handleDateSelect(date.value)}
                   className={cn(
                     'w-full px-4 py-4 text-left rounded-lg',
                     'transition-colors border border-gray-800',
-                    dateInfo.isAvailable
+                    date.isAvailable
                       ? 'hover:bg-gray-800/50 active:bg-gray-800'
                       : 'opacity-50 cursor-not-allowed',
                   )}
@@ -139,7 +190,7 @@ export default function DateRoute() {
                         {dayOfWeek}요일
                       </span>
                     </div>
-                    {!dateInfo.isAvailable && (
+                    {!date.isAvailable && (
                       <span className="text-sm text-gray-500">예매 불가</span>
                     )}
                   </div>

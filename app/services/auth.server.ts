@@ -28,6 +28,15 @@ export async function login(
       const srtService = SRTService.getInstance();
       const session = await srtService.login(username, password);
 
+      // 세션 생성 성공 확인
+      if (!session || !session.key) {
+        return {
+          success: false,
+          message: '세션 생성에 실패했습니다.',
+        };
+      }
+
+      // 로그인 성공 시 세션 키 반환
       return {
         success: true,
         sessionKey: session.key,
@@ -37,6 +46,7 @@ export async function login(
       throw new Error('KTX 로그인은 아직 구현되지 않았습니다');
     }
   } catch (error) {
+    console.error('Login service error:', error);
     return {
       success: false,
       message: error instanceof Error ? error.message : '로그인에 실패했습니다',

@@ -68,7 +68,7 @@ export class SRTService {
     };
 
     if (sessionKey) {
-      headers['Cookie'] = `JSESSIONID=${sessionKey}; SR_MB_CD=1`;
+      headers['Cookie'] = `JSESSIONID_ETK=${sessionKey}; SR_MB_CD=1`;
     }
 
     return headers;
@@ -86,12 +86,15 @@ export class SRTService {
       }
 
       const mainCookies = mainResponse.headers.get('set-cookie');
+      console.log('Initial cookies:', mainCookies);
+
       if (!mainCookies) {
         throw new Error('No cookies received from main page');
       }
 
-      const sessionMatch = mainCookies.match(/JSESSIONID=([^;]+)/);
+      const sessionMatch = mainCookies.match(/JSESSIONID_ETK=([^;]+)/);
       const sessionId = sessionMatch ? sessionMatch[1] : '';
+      console.log('Initial session ID:', sessionId);
 
       // 2. 로그인 요청
       const loginFormData = new URLSearchParams({
@@ -114,11 +117,15 @@ export class SRTService {
       );
 
       if (!loginResponse.ok) {
+        console.error('Login response status:', loginResponse.status);
         throw new Error('Login request failed');
       }
 
+      const loginCookies = loginResponse.headers.get('set-cookie');
+      console.log('Login response cookies:', loginCookies);
+
       const loginText = await loginResponse.text();
-      console.log('Login response:', loginText);
+      console.log('Login response text:', loginText);
 
       // 3. 로그인 실패 메시지 확인
       if (loginText.includes('alert')) {
@@ -133,27 +140,49 @@ export class SRTService {
 
       // 4. 로그인 성공 확인 (리다이렉션이 있으면 성공)
       if (
-        loginText.includes('location.replace') ||
-        loginText.includes('location.href')
+        loginText.includes("location.replace('/main.do')") ||
+        loginText.includes("location.href='/main.do'")
       ) {
-        // 5. 세션 유효성 검증
-        const verifyResponse = await fetch(`${this.baseUrl}/main.do`, {
-          headers: {
-            ...this.getHeaders(sessionId),
-            Referer: `${this.baseUrl}/cmc/01/selectLoginInfo.do`,
+        // 5. 세션 검증을 위한 마이페이지 접근
+        const verifyResponse = await fetch(
+          `${this.baseUrl}/mrs/mrscfm/mrscfmP01.do`,
+          {
+            headers: {
+              ...this.getHeaders(sessionId),
+              Referer: `${this.baseUrl}/main.do`,
+            },
           },
-        });
+        );
 
         const verifyText = await verifyResponse.text();
-        console.log('Verify response:', verifyText.includes('로그아웃'));
+        console.log(
+          'Verify response (마이페이지 접근):',
+          !verifyText.includes('로그인이 필요합니다'),
+        );
 
-        // 6. 세션 생성 및 반환
-        const session: SRTSession = {
-          key: sessionId,
-          memberNumber: username,
-          createdAt: new Date(),
-        };
-        return session;
+        // 마이페이지 접근이 가능하면 로그인 성공
+        if (!verifyText.includes('로그인이 필요합니다')) {
+          // 최종 세션 확인
+          const finalCookies = verifyResponse.headers.get('set-cookie');
+          const finalSessionMatch = finalCookies?.match(
+            /JSESSIONID_ETK=([^;]+)/,
+          );
+          const finalSessionId = finalSessionMatch
+            ? finalSessionMatch[1]
+            : sessionId;
+
+          console.log('Final session ID:', finalSessionId);
+
+          const session: SRTSession = {
+            key: finalSessionId,
+            memberNumber: username,
+            createdAt: new Date(),
+          };
+
+          // 세션 맵에 저장
+          this.sessions.set(finalSessionId, session);
+          return session;
+        }
       }
 
       throw new Error('로그인에 실패했습니다.');
@@ -203,22 +232,43 @@ export class SRTService {
     time: string = '000000',
   ): Promise<Train[]> {
     try {
-      const formData = new URLSearchParams();
-      formData.append('dptRsStnCd', departureStation);
-      formData.append('arvRsStnCd', arrivalStation);
-      formData.append('dptDt', date);
-      formData.append('dptTm', time);
-      formData.append('chtnDvCd', '1'); // 편도
-      formData.append('psgNum', '1'); // 승객 수
-      formData.append('seatAttCd', '015'); // 일반실
-      formData.append('arriveTime', 'N'); // 도착시각 기준 여부
-      formData.append('pageId', 'TK0101010000'); // 페이지 ID
+      // 1. 조회 페이지 접근
+      const searchPageResponse = await fetch(
+        `${this.baseUrl}/hpg/20/hpg21000/hpg21100/selectScheduleList.do`,
+        {
+          headers: {
+            ...this.getHeaders(sessionKey),
+            Referer: `${this.baseUrl}/main.do`,
+          },
+        },
+      );
+
+      if (!searchPageResponse.ok) {
+        throw new Error('Failed to access search page');
+      }
+
+      // 2. 열차 조회 요청
+      const formData = new URLSearchParams({
+        dptRsStnCd: departureStation, // 출발역 코드
+        arvRsStnCd: arrivalStation, // 도착역 코드
+        dptDt: date, // 출발일(YYYYMMDD)
+        dptTm: time, // 출발시각(HHMMSS)
+        chtnDvCd: '1', // 1: 편도
+        psgNum: '1', // 승객 수
+        seatAttCd: '015', // 015: 일반실
+        isRequest: 'Y', // 조회 요청 여부
+        dptRsStnNm: '', // 출발역 이름 (선택)
+        arvRsStnNm: '', // 도착역 이름 (선택)
+      });
 
       const response = await fetch(
-        `${this.baseUrl}/hpg/contents/search/list.do`,
+        `${this.baseUrl}/hpg/20/hpg21000/hpg21100/selectScheduleList.do`,
         {
           method: 'POST',
-          headers: this.getHeaders(sessionKey),
+          headers: {
+            ...this.getHeaders(sessionKey),
+            Referer: `${this.baseUrl}/hpg/20/hpg21000/hpg21100/selectScheduleList.do`,
+          },
           body: formData,
         },
       );
@@ -227,20 +277,24 @@ export class SRTService {
         throw new Error('Train search failed');
       }
 
-      const data = await response.json();
+      const html = await response.text();
 
-      // HTML 파싱 대신 JSON 응답 처리
-      if (!data.outDataSets || !data.outDataSets.dsOutput1) {
-        return [];
+      // 3. 로그인 세션 만료 체크
+      if (html.includes('로그인이 필요합니다')) {
+        throw new Error('Session expired');
       }
 
-      return data.outDataSets.dsOutput1.map((train: any) => ({
-        trainNo: train.stlbTrnNo,
+      // 4. 열차 정보 파싱
+      const data = await response.json();
+      const trainList = data.trainListMap?.trainList || [];
+
+      return trainList.map((train: any) => ({
+        trainNo: train.trainNo,
         departureTime: train.dptTm,
         arrivalTime: train.arvTm,
         departureStation: train.dptRsStnNm,
         arrivalStation: train.arvRsStnNm,
-        duration: train.reqTime,
+        duration: train.runTm,
         specialSeatStatus: train.sprmRsvPsbStr,
         normalSeatStatus: train.gnrmRsvPsbStr,
         reservationStatus: train.rsvPsbStr,
